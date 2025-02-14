@@ -16,4 +16,5 @@ module.exports = function routes(app) {
   app.use("/api/countries", countriesRouter);
   app.use("/api/countries", countryRouter);
   app.use("/api/universities", universityRouter);
+  app.use("/api", twoFA_Router);
 };

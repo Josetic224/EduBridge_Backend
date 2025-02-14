@@ -13,13 +13,38 @@ const generateOTP = (length = 4) => {
 };
 
 const generateToken = (id, email, expiresIn = "2d") => {
-  const payload = {
-    user: { id, email: email },
-  };
-  const token = jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn,
-  });
-  return token;
+  try {
+    // Convert id to string if it's an ObjectId
+    const userId = id.toString();
+
+    console.log("Creating token with:", { userId, email });
+
+    const payload = {
+      user: {
+        userId,
+        email,
+      },
+    };
+
+    console.log("Token payload:", JSON.stringify(payload));
+
+    if (!process.env.JWT_SECRET) {
+      throw new Error("JWT_SECRET is not configured");
+    }
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, {
+      expiresIn,
+    });
+
+    // Verify token immediately (for debugging)
+    const verified = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("Verification successful:", verified);
+
+    return token;
+  } catch (error) {
+    console.error("Token generation error:", error);
+    throw error;
+  }
 };
 const generateRefreshToken = (id, expiresIn = "10d") => {
   const payload = { user: id };
@@ -41,10 +66,31 @@ const resetPasswordToken = (id, expiresIn = "2m") => {
 
 const decodeToken = (token, secret) => {
   try {
+    console.log("Incoming token:", token);
+    console.log("Secret key exists:", !!secret);
+    console.log("Secret key length:", secret?.length);
+
+    if (!token) {
+      return { error: "Token is missing", user: null };
+    }
+
+    if (!secret) {
+      return { error: "JWT_SECRET is missing", user: null };
+    }
+
+    // Try to verify the token
     const decoded = jwt.verify(token, secret);
-    return { user: decoded.user };
+    console.log("Successfully decoded token:", decoded);
+
+    // Check the structure of the decoded token
+    if (!decoded || !decoded.user) {
+      return { error: "Invalid token structure", user: null };
+    }
+
+    return { user: decoded.user, error: null };
   } catch (error) {
-    return (error.message);
+    console.log("Token decode error:", error.message);
+    return { error: error.message, user: null };
   }
 };
 

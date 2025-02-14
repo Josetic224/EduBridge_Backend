@@ -188,7 +188,6 @@ exports.verifyUser = async (req, res) => {
   }
 };
 
-// USER LOGIN
 exports.userLogin = async (req, res) => {
   const body = LoginUserSchema.safeParse(req.body);
   if (!body.success) {
@@ -206,6 +205,7 @@ exports.userLogin = async (req, res) => {
     if (!checkUser) {
       return badRequest(res, "Incorrect credentials");
     }
+
     const checkPassword = await compare(password, checkUser.password);
     if (!checkPassword) {
       return badRequest(res, "Incorrect credentials");
@@ -218,13 +218,20 @@ exports.userLogin = async (req, res) => {
         error: "User not verified, please verify your account",
       });
     }
+
+    // Convert user ID to string
+    const userId = checkUser._id.toString();
+
     // Check if 2FA is enabled
     if (checkUser.isTwoFactorEnabled) {
       // Generate a temporary token for 2FA verification
-      const tempToken = generateToken(
-        { userId: checkUser._id, email: checkUser.email },
-        process.env.JWT_SECRET,
-      );
+      const tempToken = generateToken(userId, email);
+
+      console.log("Generated temp token for 2FA:", {
+        userId,
+        email,
+        token: tempToken,
+      });
 
       return res.status(200).json({
         message: "2FA required. Please verify with your 2FA code.",
@@ -233,32 +240,31 @@ exports.userLogin = async (req, res) => {
     }
 
     // Regular login if 2FA is not enabled
-    const authToken = generateToken(
-      { userId: checkUser._id, email: checkUser.email },
-      process.env.JWT_SECRET,
-    );
+    const authToken = generateToken(userId, email);
 
-    return res.status(200).json({ message: "Login successful.", authToken });
+    console.log("Generated auth token:", {
+      userId,
+      email,
+      token: authToken,
+    });
 
-    // const token = generateToken(checkUser._id, checkUser.email);
-
-    // res.status(200).json({
-    //   message: "Login Success",
-    //   token,
-    // });
+    return res.status(200).json({
+      message: "Login successful.",
+      authToken,
+      user: {
+        id: userId,
+        email: checkUser.email,
+        // Add other user fields as needed
+      },
+    });
   } catch (error) {
-    console.log(error);
+    console.error("Login error:", error);
     res.status(500).json({
-      errors: [
-        {
-          error: "Server Error",
-          error,
-        },
-      ],
+      error: "Server Error",
+      details: error.message,
     });
   }
 };
-
 //FINAL LOGIN FOR 2FA ONLY
 
 exports.finalizeLogin = async (req, res) => {
