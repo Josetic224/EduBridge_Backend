@@ -27,6 +27,9 @@ const {
   twoFA_Schema,
 } = require("../validations/user");
 const axios = require("axios");
+const dotenv = require("dotenv");
+dotenv.config();
+const jwt = require("jsonwebtoken");
 
 exports.fetchCountries = async (req, res) => {
   try {
@@ -582,31 +585,6 @@ exports.setPasscode = async (req, res) => {
 };
 
 exports.forgotPasscodeOtp = async (req, res) => {
-  // Extract token from headers
-  const token = req.headers["authorization"]?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "not Authorized" });
-  }
-
-  // Decode and validate token
-  const { user, error } = decodeToken(token, process.env.JWT_SECRET);
-  if (error) {
-    return res.status(401).json({ error });
-  }
-
-  // Extract user ID
-  // Extract user ID (Fix applied)
-  const userId = user.userId;
-  if (!userId) {
-    return res.status(400).json({ error: "Invalid token: user ID missing." });
-  }
-
-  // Find the user using the extracted user ID
-  const userRecord = await User.findById(userId);
-  if (!userRecord) {
-    return res.status(404).json({ error: "User not found." });
-  }
-
   const { email } = req.body;
   try {
     const user = await User.findOne({ email });
@@ -638,12 +616,11 @@ exports.forgotPasscodeOtp = async (req, res) => {
 
     res.status(200).json({ msg: `OTP sent to ${email}` });
   } catch (error) {
-    console.log("RESET PASSWORD ERROR=>", error);
+    console.log("RESET PASSCODE ERROR=>", error);
     res.status(500).json({ errors: [{ error: "Server Error" }] });
   }
 };
 
-// VERIFY OTP FOR FORGOT PASSWORD
 exports.verifyForgotPasscodeOtp = async (req, res) => {
   const body = VerifyPasscodeOtpSchema.safeParse(req.body);
   if (!body.success) {
@@ -658,25 +635,32 @@ exports.verifyForgotPasscodeOtp = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    console.log("Provided OTP:", otp); // Debugging log
-    console.log("Stored Encrypted OTP:", user.otp); // Debugging log
-
     const isOtpValid = await compare(otp, user.otp);
-    console.log("Is OTP valid:", isOtpValid); // Debugging log
-
     if (!isOtpValid) {
       return res.status(400).json({ error: "Invalid OTP" });
     }
 
     const isOtpExpired =
       getSecondsBetweenTime(user.otpExpireIn) > timeDifference["2m"];
-    console.log("Is OTP expired:", isOtpExpired); // Debugging log
-
     if (isOtpExpired) {
       return res.status(400).json({ error: "This OTP has expired" });
     }
 
-    res.status(200).json({ message: "OTP Verified!" });
+    try {
+      const tempToken = jwt.sign(
+        { userId: user._id, email: user.email },
+        process.env.JWT_SECRET,
+        { expiresIn: "10m" }
+      );
+      console.log("Generated Temp Token:", tempToken);
+    } catch (jwtError) {
+      console.log("JWT SIGN ERROR:", jwtError);
+    }
+
+    return res.status(200).json({
+      message: "OTP Verified!",
+      tempToken: tempToken,
+    });
   } catch (error) {
     console.log("VERIFY OTP ERROR=>", error);
     res.status(500).json({ errors: [{ error: "Server Error" }] });
@@ -685,43 +669,35 @@ exports.verifyForgotPasscodeOtp = async (req, res) => {
 
 exports.resetPasscode = async (req, res) => {
   try {
-    // Extract token from headers
+    // Extract temporary token from headers
     const token = req.headers["authorization"]?.split(" ")[1];
-    console.log(token);
     if (!token) {
       return res.status(401).json({ error: "Authorization token is missing." });
     }
 
     // Decode and validate token
-    const { user, error } = decodeToken(token, process.env.JWT_SECRET);
-    if (error) {
-      if (error.includes("expired")) {
-        return res
-          .status(401)
-          .json({ error: "Token has expired. Please log in again." });
-      }
-      return res.status(401).json({ error });
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      console.log(decoded);
+    } catch (err) {
+      return res.status(401).json({ error: "Invalid or expired token." });
     }
-    console.log(User);
 
-    // Extract user ID
-    const userId = user.userId;
-    console.log(userId);
+    // Extract user ID from token
+    const { userId } = decoded;
     if (!userId) {
       return res.status(400).json({ error: "Invalid token: user ID missing." });
     }
 
-    // Find the user using the extracted user ID
+    // Find user in database
     const userRecord = await User.findById(userId);
-    console.log(userRecord);
     if (!userRecord) {
       return res.status(404).json({ error: "User not found." });
     }
 
     // Validate request body
     const body = setPasscodeSchema.safeParse(req.body);
-    console.log(body);
-
     if (!body.success) {
       return res.status(400).json({ errors: body.error.issues });
     }
@@ -743,7 +719,7 @@ exports.resetPasscode = async (req, res) => {
 
     return res
       .status(200)
-      .json({ message: "Passcode has been successfully set." });
+      .json({ message: "Passcode has been successfully reset." });
   } catch (error) {
     console.log("RESET PASSCODE ERROR=>", error);
     res.status(500).json({ errors: [{ error: "Server Error" }] });

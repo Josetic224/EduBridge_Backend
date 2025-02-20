@@ -94,10 +94,32 @@ const decodeToken = (token, secret) => {
   }
 };
 
+const authMiddleware = async (req, res, next) => {
+  try {
+    const token = req.header("Authorization")?.split(" ")[1]; // Extract token
+    if (!token) {
+      return res
+        .status(401)
+        .json({ error: "Access denied. No token provided." });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET); // Verify token
+    req.user = await User.findById(decoded.id).select("-password"); // Attach user to req
+    if (!req.user) {
+      return res.status(401).json({ error: "User not found" });
+    }
+
+    next(); // Move to next middleware or controller
+  } catch (error) {
+    res.status(401).json({ error: "Invalid token." });
+  }
+};
+
 module.exports = {
   generateOTP,
   generateToken,
   decodeToken,
   generateRefreshToken,
   resetPasswordToken,
+  authMiddleware,
 };
