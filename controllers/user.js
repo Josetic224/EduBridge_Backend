@@ -88,7 +88,7 @@ exports.createUser = async (req, res) => {
 
     // Check if the selected university is in the list of universities by matching the name
     const universityExists = universities.some(
-      (uni) => uni.name === university,
+      (uni) => uni.name === university
     );
 
     if (!universityExists) {
@@ -188,6 +188,8 @@ exports.verifyUser = async (req, res) => {
   }
 };
 
+const UAParser = require("ua-parser-js"); // Install this package: npm install ua-parser-js
+
 exports.userLogin = async (req, res) => {
   const body = LoginUserSchema.safeParse(req.body);
   if (!body.success) {
@@ -219,8 +221,47 @@ exports.userLogin = async (req, res) => {
       });
     }
 
+    // Get device and location information
+    const parser = new UAParser(req.headers["user-agent"]);
+    const userAgent = parser.getResult();
+
+    // Get IP address
+    const ip =
+      req.ip ||
+      req.connection.remoteAddress ||
+      req.socket.remoteAddress ||
+      req.connection.socket.remoteAddress;
+
+    // Create login info object
+    const loginInfo = {
+      device: {
+        browser: userAgent.browser.name || "Unknown",
+        browserVersion: userAgent.browser.version || "Unknown",
+        os: userAgent.os.name || "Unknown",
+        osVersion: userAgent.os.version || "Unknown",
+        device: userAgent.device.model || "Unknown",
+        deviceType: userAgent.device.type || "Desktop",
+      },
+      ip: ip,
+      timestamp: new Date(),
+      location: "Unknown", // You can add IP geolocation here if needed
+    };
+
     // Convert user ID to string
     const userId = checkUser._id.toString();
+
+    // Save login history to user document
+    if (!checkUser.loginHistory) {
+      checkUser.loginHistory = [];
+    }
+    checkUser.loginHistory.push(loginInfo);
+
+    // Keep only last 10 login records
+    if (checkUser.loginHistory.length > 10) {
+      checkUser.loginHistory = checkUser.loginHistory.slice(-10);
+    }
+
+    await checkUser.save();
 
     // Check if 2FA is enabled
     if (checkUser.isTwoFactorEnabled) {
@@ -236,6 +277,7 @@ exports.userLogin = async (req, res) => {
       return res.status(200).json({
         message: "2FA required. Please verify with your 2FA code.",
         tempToken,
+        loginInfo,
       });
     }
 
@@ -256,6 +298,7 @@ exports.userLogin = async (req, res) => {
         email: checkUser.email,
         // Add other user fields as needed
       },
+      loginInfo,
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -285,7 +328,7 @@ exports.finalizeLogin = async (req, res) => {
     // Decode the tempToken to get the user ID
     const decoded = decodeToken(token, process.env.JWT_SECRET);
     // console.log(decoded)
-    const userId = decoded.user.id.userId;
+    const userId = decoded.user?.userId;
     console.log(userId);
 
     const user = await User.findById(userId);
@@ -300,6 +343,7 @@ exports.finalizeLogin = async (req, res) => {
       secret: user.twoFactorSecret,
       encoding: "base32",
       token: totp,
+      window: 1, // Accepts past and future codes
     });
 
     console.log(isVerified);
@@ -309,10 +353,7 @@ exports.finalizeLogin = async (req, res) => {
     }
 
     // Issue the actual authentication token
-    const authToken = generateToken(
-      { userId: user._id, email: user.email },
-      process.env.JWT_SECRET,
-    );
+    const authToken = generateToken(user._id, user.email);
 
     return res.status(200).json({ message: "Login successful.", authToken });
   } catch (error) {
@@ -498,8 +539,8 @@ exports.setPasscode = async (req, res) => {
       return res.status(401).json({ error });
     }
 
-    // Extract user ID
-    const userId = user.id; // Ensure the token contains an `id` field
+    // Extract user ID (Fix applied)
+    const userId = user.userId;
     if (!userId) {
       return res.status(400).json({ error: "Invalid token: user ID missing." });
     }
@@ -554,7 +595,8 @@ exports.forgotPasscodeOtp = async (req, res) => {
   }
 
   // Extract user ID
-  const userId = user.id; // Ensure the token contains an `id` field
+  // Extract user ID (Fix applied)
+  const userId = user.userId;
   if (!userId) {
     return res.status(400).json({ error: "Invalid token: user ID missing." });
   }
@@ -645,31 +687,41 @@ exports.resetPasscode = async (req, res) => {
   try {
     // Extract token from headers
     const token = req.headers["authorization"]?.split(" ")[1];
+    console.log(token);
     if (!token) {
-      s;
       return res.status(401).json({ error: "Authorization token is missing." });
     }
 
     // Decode and validate token
     const { user, error } = decodeToken(token, process.env.JWT_SECRET);
     if (error) {
+      if (error.includes("expired")) {
+        return res
+          .status(401)
+          .json({ error: "Token has expired. Please log in again." });
+      }
       return res.status(401).json({ error });
     }
+    console.log(User);
 
     // Extract user ID
-    const userId = user.id; // Ensure the token contains an `id` field
+    const userId = user.userId;
+    console.log(userId);
     if (!userId) {
       return res.status(400).json({ error: "Invalid token: user ID missing." });
     }
 
     // Find the user using the extracted user ID
     const userRecord = await User.findById(userId);
+    console.log(userRecord);
     if (!userRecord) {
       return res.status(404).json({ error: "User not found." });
     }
 
     // Validate request body
     const body = setPasscodeSchema.safeParse(req.body);
+    console.log(body);
+
     if (!body.success) {
       return res.status(400).json({ errors: body.error.issues });
     }
@@ -693,8 +745,25 @@ exports.resetPasscode = async (req, res) => {
       .status(200)
       .json({ message: "Passcode has been successfully set." });
   } catch (error) {
-    console.log("SET PASSCODE ERROR=>", error);
+    console.log("RESET PASSCODE ERROR=>", error);
     res.status(500).json({ errors: [{ error: "Server Error" }] });
+  }
+};
+
+exports.getAllUsers = async (req, res) => {
+  try {
+    // Fetch all users (excluding sensitive data like passwords)
+    const users = await User.find().select("-password");
+
+    // Check if users exist
+    if (!users.length) {
+      return res.status(404).json({ message: "No users found" });
+    }
+
+    res.status(200).json({ success: true, data: users });
+  } catch (error) {
+    console.error("GET ALL USERS ERROR =>", error);
+    res.status(500).json({ success: false, error: "Server Error" });
   }
 };
 
@@ -702,6 +771,7 @@ module.exports = {
   fetchCountries: exports.fetchCountries,
   createUser: exports.createUser,
   verifyUser: exports.verifyUser,
+  getAllUsers: exports.getAllUsers,
   userLogin: exports.userLogin,
   resendVerificationOTP: exports.resendVerificationOTP,
   verifyForgotPasswordOtp: exports.verifyForgotPasswordOtp,

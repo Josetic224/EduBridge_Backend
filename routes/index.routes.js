@@ -11,6 +11,7 @@ const { twoFA_Router } = require("./api/2FA");
 module.exports = function routes(app) {
   app.use(express.json());
   app.use("/api/student", userRouter);
+  app.use("/api/students", userRouter);
   app.use("/api/student", twoFA_Router);
   app.use("/api/lecturer", userRouter);
   app.use("/api/countries", countriesRouter);

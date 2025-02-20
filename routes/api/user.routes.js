@@ -14,6 +14,7 @@ const {
   resetPasscode,
   finalizeLogin,
   getUniversitiesByCountry,
+  getAllUsers,
 } = require("../../controllers/user");
 const { isAuthenticated } = require("../../middlewares/auth");
 
@@ -39,6 +40,7 @@ userRouter.post("/set-passcode", setPasscode);
 userRouter.post("/forgot-passcode", forgotPasscodeOtp);
 userRouter.post("/verify-passcode-otp", verifyForgotPasswordOtp);
 userRouter.post("/reset-passcode", resetPasscode);
+userRouter.get("/all", getAllUsers);
 
 userRouter.post("/login", userLogin);
 userRouter.post("/2FA-login", finalizeLogin);
