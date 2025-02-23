@@ -31,6 +31,7 @@ const generateToken = (id, email, expiresIn = "2d") => {
     if (!process.env.JWT_SECRET) {
       throw new Error("JWT_SECRET is not configured");
     }
+    console.log("JWT_SECRET:", process.env.JWT_SECRET);
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn,
@@ -46,6 +47,42 @@ const generateToken = (id, email, expiresIn = "2d") => {
     throw error;
   }
 };
+
+const generateTempToken = (id, email, expiresIn = "30m") => {
+  try {
+    // Convert id to string if it's an ObjectId
+    const userId = id.toString();
+
+    console.log("Creating token with:", { userId, email });
+
+    const payload = {
+      user: {
+        userId,
+        email,
+      },
+    };
+
+    console.log("Token payload:", JSON.stringify(payload));
+
+    if (!process.env.JWT_SECRET) {
+      throw new Error("JWT_SECRET is not configured");
+    }
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, {
+      expiresIn,
+    });
+
+    // Verify token immediately (for debugging)
+    const verified = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("Verification successful:", verified);
+
+    return token;
+  } catch (error) {
+    console.error("Token generation error:", error);
+    throw error;
+  }
+};
+
 const generateRefreshToken = (id, expiresIn = "10d") => {
   const payload = { user: id };
   const token = jwt.sign(payload, process.env.REFRESH_TOKEN, {
@@ -118,6 +155,7 @@ const authMiddleware = async (req, res, next) => {
 module.exports = {
   generateOTP,
   generateToken,
+  generateTempToken,
   decodeToken,
   generateRefreshToken,
   resetPasswordToken,
