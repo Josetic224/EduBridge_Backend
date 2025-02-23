@@ -69,62 +69,6 @@ exports.setup2FA = async (req, res) => {
   }
 };
 
-// exports.verify2FA = async (req, res) => {
-//   try {
-//     // Validate request body
-//     const body = twoFA_Schema.safeParse(req.body);
-//     if (!body.success) {
-//       return res.status(400).json({ errors: body.error.issues });
-//     }
-//     const { totp } = body.data;
-
-//     // Extract the Bearer token from headers
-//     const token = req.headers["authorization"]?.split(" ")[1];
-//     if (!token) {
-//       return res.status(401).json({ error: "Authorization token is missing." });
-//     }
-
-//     // Decode and validate token
-//     const { user, error } = decodeToken(token, process.env.JWT_SECRET);
-//     if (error) {
-//       return res.status(401).json({ error });
-//     }
-
-//     // Access user information from the decoded token
-//     const userId = user.userId;
-//     console.log(userId);
-
-//     // Get the user's 2FA secret from the database
-//     const getUser = await User.findById(userId);
-//     console.log(userId);
-//     if (!getUser || !getUser.twoFactorSecret) {
-//       return res.status(400).json({ error: "2FA not enabled for this user." });
-//     }
-
-//     // Log the stored secret before verification
-//     console.log("Stored 2FA Secret:", getUser.twoFactorSecret);
-
-//     // Verify the provided token
-//     const isVerified = speakeasy.totp.verify({
-//       secret: getUser.twoFactorSecret,
-//       encoding: "base32",
-//       token: totp, // Note: Fix here to match speakeasy's `token` parameter
-//     });
-
-//     console.log(isverified);
-
-//     if (!isVerified) {
-//       return res.status(401).json({ error: "Invalid 2FA code." });
-//     }
-
-//     // If verification is successful
-//     return res.status(200).json({ message: "2FA verification successful." });
-//   } catch (error) {
-//     console.log("2FA Verification Error=>", error);
-//     return res.status(500).json({ error: "Server error." });
-//   }
-//}
-
 exports.verify2FA = async (req, res) => {
   try {
     // Validate request body

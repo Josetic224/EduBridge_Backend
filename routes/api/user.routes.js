@@ -14,13 +14,17 @@ const {
   resetPasscode,
   finalizeLogin,
   getUniversitiesByCountry,
+  editEmail,
+  editUserName,
   getAllUsers,
+  verifyForgotPasscodeOtp,
 } = require("../../controllers/user");
 const { isAuthenticated } = require("../../middlewares/auth");
 
 const { Router } = express;
 
 const userRouter = Router();
+const lecturerRouter = Router();
 const countriesRouter = Router();
 const universityRouter = Router();
 const countryRouter = Router();
@@ -29,6 +33,8 @@ const countryRouter = Router();
 // desc  create user
 // access public
 userRouter.post("/register", createUser);
+userRouter.post("/edit_email", editEmail);
+userRouter.post("/edit_username", editUserName);
 countriesRouter.get("/fetchCountries", fetchCountries);
 universityRouter.get("/countries/:country", getUniversitiesByCountry);
 userRouter.post("/otp-verification", verifyUser);
@@ -38,7 +44,7 @@ userRouter.post("/verify-password-otp", verifyForgotPasswordOtp);
 userRouter.post("/reset-password", resetPassword);
 userRouter.post("/set-passcode", setPasscode);
 userRouter.post("/forgot-passcode", forgotPasscodeOtp);
-userRouter.post("/verify-passcode-otp", verifyForgotPasswordOtp);
+userRouter.post("/verify-passcode-otp", verifyForgotPasscodeOtp);
 userRouter.post("/reset-passcode", resetPasscode);
 userRouter.get("/all", getAllUsers);
 

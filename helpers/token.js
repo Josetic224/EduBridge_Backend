@@ -31,6 +31,7 @@ const generateToken = (id, email, expiresIn = "2d") => {
     if (!process.env.JWT_SECRET) {
       throw new Error("JWT_SECRET is not configured");
     }
+    console.log("JWT_SECRET:", process.env.JWT_SECRET);
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn,
@@ -46,6 +47,42 @@ const generateToken = (id, email, expiresIn = "2d") => {
     throw error;
   }
 };
+
+const generateTempToken = (id, email, expiresIn = "30m") => {
+  try {
+    // Convert id to string if it's an ObjectId
+    const userId = id.toString();
+
+    console.log("Creating token with:", { userId, email });
+
+    const payload = {
+      user: {
+        userId,
+        email,
+      },
+    };
+
+    console.log("Token payload:", JSON.stringify(payload));
+
+    if (!process.env.JWT_SECRET) {
+      throw new Error("JWT_SECRET is not configured");
+    }
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, {
+      expiresIn,
+    });
+
+    // Verify token immediately (for debugging)
+    const verified = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("Verification successful:", verified);
+
+    return token;
+  } catch (error) {
+    console.error("Token generation error:", error);
+    throw error;
+  }
+};
+
 const generateRefreshToken = (id, expiresIn = "10d") => {
   const payload = { user: id };
   const token = jwt.sign(payload, process.env.REFRESH_TOKEN, {
@@ -94,10 +131,33 @@ const decodeToken = (token, secret) => {
   }
 };
 
+const authMiddleware = async (req, res, next) => {
+  try {
+    const token = req.header("Authorization")?.split(" ")[1]; // Extract token
+    if (!token) {
+      return res
+        .status(401)
+        .json({ error: "Access denied. No token provided." });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET); // Verify token
+    req.user = await User.findById(decoded.id).select("-password"); // Attach user to req
+    if (!req.user) {
+      return res.status(401).json({ error: "User not found" });
+    }
+
+    next(); // Move to next middleware or controller
+  } catch (error) {
+    res.status(401).json({ error: "Invalid token." });
+  }
+};
+
 module.exports = {
   generateOTP,
   generateToken,
+  generateTempToken,
   decodeToken,
   generateRefreshToken,
   resetPasswordToken,
+  authMiddleware,
 };

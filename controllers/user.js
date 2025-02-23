@@ -5,12 +5,17 @@ const {
   fetchCountriesData,
   fetchUniversitiesByCountry,
 } = require("../helpers/fetchCountries");
-const { createAccountOtp, welcomeEmail } = require("../helpers/mails/otp");
+const {
+  createAccountOtp,
+  welcomeEmail,
+  resetPasscodeOtp,
+} = require("../helpers/mails/otp");
 const {
   generateOTP,
   generateRefreshToken,
   generateToken,
   decodeToken,
+  generateTempToken,
 } = require("../helpers/token");
 const User = require("../models/User");
 const { validateUser } = require("../services/auth");
@@ -27,6 +32,9 @@ const {
   twoFA_Schema,
 } = require("../validations/user");
 const axios = require("axios");
+const dotenv = require("dotenv");
+dotenv.config();
+const jwt = require("jsonwebtoken");
 
 exports.fetchCountries = async (req, res) => {
   try {
@@ -198,7 +206,7 @@ exports.userLogin = async (req, res) => {
     });
   }
 
-  const { email, password } = body.data;
+  const { email, password, passcode } = body.data;
   try {
     const checkUser = await User.findOne({
       email: email,
@@ -208,8 +216,14 @@ exports.userLogin = async (req, res) => {
       return badRequest(res, "Incorrect credentials");
     }
 
-    const checkPassword = await compare(password, checkUser.password);
-    if (!checkPassword) {
+    const checkPassword = password
+      ? await compare(password, checkUser.password)
+      : false;
+    const checkPasscode = passcode
+      ? await compare(passcode, checkUser.passcode)
+      : false;
+
+    if (!checkPassword && !checkPasscode) {
       return badRequest(res, "Incorrect credentials");
     }
 
@@ -239,7 +253,7 @@ exports.userLogin = async (req, res) => {
         browserVersion: userAgent.browser.version || "Unknown",
         os: userAgent.os.name || "Unknown",
         osVersion: userAgent.os.version || "Unknown",
-        device: userAgent.device.model || "Unknown",
+        device: userAgent.device || "Unknown",
         deviceType: userAgent.device.type || "Desktop",
       },
       ip: ip,
@@ -293,11 +307,7 @@ exports.userLogin = async (req, res) => {
     return res.status(200).json({
       message: "Login successful.",
       authToken,
-      user: {
-        id: userId,
-        email: checkUser.email,
-        // Add other user fields as needed
-      },
+      checkUser,
       loginInfo,
     });
   } catch (error) {
@@ -347,7 +357,6 @@ exports.finalizeLogin = async (req, res) => {
     });
 
     console.log(isVerified);
-
     if (!isVerified) {
       return res.status(401).json({ error: "Invalid 2FA code.", Error });
     }
@@ -355,7 +364,9 @@ exports.finalizeLogin = async (req, res) => {
     // Issue the actual authentication token
     const authToken = generateToken(user._id, user.email);
 
-    return res.status(200).json({ message: "Login successful.", authToken });
+    return res
+      .status(200)
+      .json({ message: "Login successful.", authToken, user });
   } catch (error) {
     console.log("Finalize Login Error=>", error);
     res.status(500).json({ error: "Server error." });
@@ -441,14 +452,14 @@ exports.forgotPasswordOtp = async (req, res) => {
   }
 };
 
-// VERIFY OTP FOR FORGOT PASSWORD
+// VERIFY OTP FOR FORGOT PASSWORD (with resend feature)
 exports.verifyForgotPasswordOtp = async (req, res) => {
   const body = VerifyPasswordOtpSchema.safeParse(req.body);
   if (!body.success) {
     return res.status(400).json({ errors: body.error.issues });
   }
 
-  const { email, otp } = body.data;
+  const { email, otp, requestResend } = body.data; // Expect `requestResend` from frontend
 
   try {
     const user = await User.findOne({ email });
@@ -456,22 +467,44 @@ exports.verifyForgotPasswordOtp = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    console.log("Provided OTP:", otp); // Debugging log
-    console.log("Stored Encrypted OTP:", user.otp); // Debugging log
+    // If user requests a resend, generate and send a new OTP
+    if (
+      requestResend ||
+      !user.otp ||
+      getSecondsBetweenTime(user.otpExpireIn) > timeDifference["2m"]
+    ) {
+      const newOtpValue = generateOTP();
+      console.log("Generated New OTP (plain):", newOtpValue);
+
+      const newOtp = await encrypt(newOtpValue);
+      console.log("Encrypted New OTP:", newOtp);
+
+      user.otp = newOtp;
+      user.otpExpireIn = new Date().getTime() + 5 * 60 * 1000; // Reset expiry to 5 minutes
+      await user.save();
+
+      console.log("User after resending OTP:", user);
+
+      const data = {
+        to: email,
+        text: "Edubridge Forgot Password OTP",
+        subject: "New OTP To Reset Your Password",
+        html: createAccountOtp(newOtpValue),
+      };
+      await sendEmail(data);
+
+      return res.status(200).json({ message: `New OTP sent to ${email}` });
+    }
+
+    // Proceed with OTP verification
+    console.log("Provided OTP:", otp);
+    console.log("Stored Encrypted OTP:", user.otp);
 
     const isOtpValid = await compare(otp, user.otp);
-    console.log("Is OTP valid:", isOtpValid); // Debugging log
+    console.log("Is OTP valid:", isOtpValid);
 
     if (!isOtpValid) {
       return res.status(400).json({ error: "Invalid OTP" });
-    }
-
-    const isOtpExpired =
-      getSecondsBetweenTime(user.otpExpireIn) > timeDifference["2m"];
-    console.log("Is OTP expired:", isOtpExpired); // Debugging log
-
-    if (isOtpExpired) {
-      return res.status(400).json({ error: "This OTP has expired" });
     }
 
     res.status(200).json({ message: "OTP Verified!" });
@@ -550,7 +583,6 @@ exports.setPasscode = async (req, res) => {
     if (!userRecord) {
       return res.status(404).json({ error: "User not found." });
     }
-
     // Validate request body
     const body = setPasscodeSchema.safeParse(req.body);
     if (!body.success) {
@@ -582,31 +614,6 @@ exports.setPasscode = async (req, res) => {
 };
 
 exports.forgotPasscodeOtp = async (req, res) => {
-  // Extract token from headers
-  const token = req.headers["authorization"]?.split(" ")[1];
-  if (!token) {
-    return res.status(401).json({ error: "not Authorized" });
-  }
-
-  // Decode and validate token
-  const { user, error } = decodeToken(token, process.env.JWT_SECRET);
-  if (error) {
-    return res.status(401).json({ error });
-  }
-
-  // Extract user ID
-  // Extract user ID (Fix applied)
-  const userId = user.userId;
-  if (!userId) {
-    return res.status(400).json({ error: "Invalid token: user ID missing." });
-  }
-
-  // Find the user using the extracted user ID
-  const userRecord = await User.findById(userId);
-  if (!userRecord) {
-    return res.status(404).json({ error: "User not found." });
-  }
-
   const { email } = req.body;
   try {
     const user = await User.findOne({ email });
@@ -638,44 +645,71 @@ exports.forgotPasscodeOtp = async (req, res) => {
 
     res.status(200).json({ msg: `OTP sent to ${email}` });
   } catch (error) {
-    console.log("RESET PASSWORD ERROR=>", error);
+    console.log("RESET PASSCODE ERROR=>", error);
     res.status(500).json({ errors: [{ error: "Server Error" }] });
   }
 };
-
-// VERIFY OTP FOR FORGOT PASSWORD
 exports.verifyForgotPasscodeOtp = async (req, res) => {
   const body = VerifyPasscodeOtpSchema.safeParse(req.body);
   if (!body.success) {
     return res.status(400).json({ errors: body.error.issues });
   }
 
-  const { email, otp } = body.data;
+  const { email, otp, requestResend } = body.data; // Expect `requestResend`
 
   try {
     const user = await User.findOne({ email });
+
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
+    const userId = user.id.toString();
+    const userEmail = user.email;
+    console.log("User ID:", userId);
+    console.log("User Email:", user.email);
 
-    console.log("Provided OTP:", otp); // Debugging log
-    console.log("Stored Encrypted OTP:", user.otp); // Debugging log
+    // If user requests a resend, generate and send a new OTP
+    if (
+      requestResend ||
+      !user.otp ||
+      getSecondsBetweenTime(user.otpExpireIn) > timeDifference["2m"]
+    ) {
+      const newOtpValue = generateOTP();
+      console.log("Generated New OTP (plain):", newOtpValue);
+
+      const newOtp = await encrypt(newOtpValue);
+      console.log("Encrypted New OTP:", newOtp);
+
+      user.otp = newOtp;
+      user.otpExpireIn = new Date().getTime() + 5 * 60 * 1000; // Reset expiry to 5 minutes
+      await user.save();
+
+      console.log("User after resending OTP:", user);
+
+      const data = {
+        to: email,
+        text: "Edubridge Forgot Passcode OTP",
+        subject: "New OTP To Reset Your Passcode",
+        html: resetPasscodeOtp(newOtpValue),
+      };
+      await sendEmail(data);
+
+      return res.status(200).json({ message: `New OTP sent to ${email}` });
+    }
+
+    // Proceed with OTP verification
+    console.log("Provided OTP:", otp);
+    console.log("Stored Encrypted OTP:", user.otp);
 
     const isOtpValid = await compare(otp, user.otp);
-    console.log("Is OTP valid:", isOtpValid); // Debugging log
+    console.log("Is OTP valid:", isOtpValid);
 
     if (!isOtpValid) {
       return res.status(400).json({ error: "Invalid OTP" });
     }
-
-    const isOtpExpired =
-      getSecondsBetweenTime(user.otpExpireIn) > timeDifference["2m"];
-    console.log("Is OTP expired:", isOtpExpired); // Debugging log
-
-    if (isOtpExpired) {
-      return res.status(400).json({ error: "This OTP has expired" });
-    }
-
+    // Generate temporary token upon successful OTP verification
+    const tempToken = await generateToken(userId, userEmail);
+    console.log("Generated tempToken:", tempToken);
     res.status(200).json({ message: "OTP Verified!" });
   } catch (error) {
     console.log("VERIFY OTP ERROR=>", error);
@@ -685,43 +719,29 @@ exports.verifyForgotPasscodeOtp = async (req, res) => {
 
 exports.resetPasscode = async (req, res) => {
   try {
-    // Extract token from headers
+    // Extract temporary token from headers
     const token = req.headers["authorization"]?.split(" ")[1];
-    console.log(token);
     if (!token) {
       return res.status(401).json({ error: "Authorization token is missing." });
     }
 
     // Decode and validate token
-    const { user, error } = decodeToken(token, process.env.JWT_SECRET);
-    if (error) {
-      if (error.includes("expired")) {
-        return res
-          .status(401)
-          .json({ error: "Token has expired. Please log in again." });
-      }
-      return res.status(401).json({ error });
-    }
-    console.log(User);
+    let decoded = decodeToken(token, process.env.JWT_SECRET);
 
-    // Extract user ID
-    const userId = user.userId;
-    console.log(userId);
+    // Extract user ID from token
+    const userId = decoded.user.userId;
     if (!userId) {
       return res.status(400).json({ error: "Invalid token: user ID missing." });
     }
 
-    // Find the user using the extracted user ID
+    // Find user in database
     const userRecord = await User.findById(userId);
-    console.log(userRecord);
     if (!userRecord) {
       return res.status(404).json({ error: "User not found." });
     }
 
     // Validate request body
     const body = setPasscodeSchema.safeParse(req.body);
-    console.log(body);
-
     if (!body.success) {
       return res.status(400).json({ errors: body.error.issues });
     }
@@ -743,9 +763,83 @@ exports.resetPasscode = async (req, res) => {
 
     return res
       .status(200)
-      .json({ message: "Passcode has been successfully set." });
+      .json({ message: "Passcode has been successfully reset." });
   } catch (error) {
     console.log("RESET PASSCODE ERROR=>", error);
+    res.status(500).json({ errors: [{ error: "Server Error" }] });
+  }
+};
+
+exports.editUserName = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Authorization token is missing." });
+    }
+
+    let decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) {
+      return res.status(400).json({ error: "Invalid token: user ID missing." });
+    }
+
+    const { userName } = req.body;
+    if (!userName) {
+      return res.status(400).json({ error: "Username is required." });
+    }
+
+    const checkUserName = await User.findOne({ userName });
+    if (checkUserName && checkUserName._id.toString() !== userId) {
+      return res.status(400).json({ error: "Username already taken" });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { userName },
+      { new: true }
+    );
+    return res
+      .status(200)
+      .json({ message: "Username updated successfully", user: updatedUser });
+  } catch (error) {
+    console.error("EDIT USERNAME ERROR =>", error);
+    res.status(500).json({ errors: [{ error: "Server Error" }] });
+  }
+};
+
+exports.editEmail = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Authorization token is missing." });
+    }
+
+    let decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) {
+      return res.status(400).json({ error: "Invalid token: user ID missing." });
+    }
+
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const checkEmail = await User.findOne({ email });
+    if (checkEmail && checkEmail._id.toString() !== userId) {
+      return res.status(400).json({ error: "Email already taken" });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { email },
+      { new: true }
+    );
+    return res
+      .status(200)
+      .json({ message: "Email updated successfully", user: updatedUser });
+  } catch (error) {
+    console.error("EDIT EMAIL ERROR =>", error);
     res.status(500).json({ errors: [{ error: "Server Error" }] });
   }
 };
@@ -780,6 +874,8 @@ module.exports = {
   setPasscode: exports.setPasscode,
   forgotPasscodeOtp: exports.forgotPasscodeOtp,
   verifyForgotPasscodeOtp: exports.verifyForgotPasscodeOtp,
+  editUserName: exports.editUserName,
+  editEmail: exports.editEmail,
   resetPasscode: exports.resetPasscode,
   finalizeLogin: exports.finalizeLogin,
   getUniversitiesByCountry: exports.getUniversitiesByCountry,
