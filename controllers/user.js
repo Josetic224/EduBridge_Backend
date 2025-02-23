@@ -292,6 +292,7 @@ exports.userLogin = async (req, res) => {
         message: "2FA required. Please verify with your 2FA code.",
         tempToken,
         loginInfo,
+        checkUser,
       });
     }
 
