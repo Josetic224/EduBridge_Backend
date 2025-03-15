@@ -27,14 +27,13 @@ const VerifyUserSchema = z
       })
       .email("invalid email address"),
     otp: z
-      .string({
-        required_error: "otp is required",
-      })
+      .string()
       .min(4, "otp must be 4 characters long")
-      .max(4, "otp can only be 4 characters long"),
+      .max(4, "otp can only be 4 characters long")
+      .optional(),
+    requestResend: z.boolean().optional(),
   })
   .strict();
-
 const LoginUserSchema = z
   .object({
     email: z
@@ -53,6 +52,14 @@ const editUserNameSchema = z.object({
     .string()
     .min(3, "Username must be at least 3 characters long.")
     .max(20, "Username cannot exceed 20 characters."),
+});
+
+const editEmailOtp = z.object({
+  otp: z
+    .string()
+    .min(4, "otp must be 4 characters long")
+    .max(4, "otp can only be 4 characters long")
+    .optional(),
 });
 
 const editEmailSchema = z.object({
@@ -243,4 +250,5 @@ module.exports = {
   setPasscodeSchema,
   VerifyPasscodeOtpSchema,
   twoFA_Schema,
+  editEmailOtp,
 };

@@ -15,4 +15,4 @@ class HTTPClient {
   }
 }
 
-module.exports = { HTTPClient };
+module.exports = { HTTPClient }
