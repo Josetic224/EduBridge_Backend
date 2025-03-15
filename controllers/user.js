@@ -39,23 +39,20 @@ const jwt = require("jsonwebtoken");
 const multer = require('multer');
 const {badRequest, notFound, formatServerError} = require("../helpers/error")
 const BlacklistToken = require("../models/logout")
+const cloudinary = require("../services/cloudinary");
+const {CloudinaryStorage} = require("multer-storage-cloudinary")
 
-// Multer configuration
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: "uploads/",
-    filename: (req, file, cb) => {
-      cb(null, `${Date.now()}-${file.originalname}`);
-    },
-  }),
-  fileFilter: (req, file, cb) => {
-    if (!file.mimetype.startsWith("image/")) {
-      return cb(new Error("Only image uploads are allowed."), false);
-    }
-    cb(null, true);
+// Cloudinary storage configuration
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "profile_pictures", // Folder name in Cloudinary
+    format: async (req, file) => "png", // Convert all images to PNG
+    public_id: (req, file) => `${Date.now()}-${file.originalname}`,
   },
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB max file size
 });
+
+const upload = multer({ storage });
 
 exports.fetchCountries = async (req, res) => {
   try {
@@ -982,11 +979,15 @@ exports.deactivateAccount = async (req, res) => {
   }
 };
 
+
+
+// **Upload Profile Picture & Save Cloudinary URL**
 exports.uploadProfilePic = async (req, res) => {
   upload.single("profilePic")(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
 
     try {
+      // Extract token
       const token = req.headers["authorization"]?.split(" ")[1];
       if (!token) return res.status(401).json({ error: "Authorization token is missing." });
 
@@ -997,16 +998,45 @@ exports.uploadProfilePic = async (req, res) => {
       const user = await User.findById(userId);
       if (!user) return res.status(404).json({ error: "User not found." });
 
+      // **Save Cloudinary URL instead of local path**
       user.profileImage = req.file.path;
       await user.save();
 
-      return res.status(200).json({ message: "Profile image uploaded successfully", user });
+      return res.status(200).json({
+        message: "Profile image uploaded successfully",
+        profileImage: user.profileImage, // Hosted Cloudinary URL
+      });
     } catch (error) {
       console.error("UPLOAD PROFILE ERROR =>", error);
       return formatServerError(res, "Error uploading profile picture", error);
     }
   });
 };
+
+
+
+exports.getProfilePic = async (req, res) => {
+  try {
+    // Extract token
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Authorization token is missing." });
+
+    const decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) return res.status(400).json({ error: "Invalid token: user ID missing." });
+
+    const user = await User.findById(userId);
+    if (!user || !user.profileImage) {
+      return res.status(404).json({ error: "Profile image not found." });
+    }
+
+    return res.status(200).json({ profileImage: user.profileImage });
+  } catch (error) {
+    console.error("GET PROFILE IMAGE ERROR =>", error);
+    return res.status(500).json({ error: "Error fetching profile picture." });
+  }
+};
+
 
 exports.getLecturerDetails = async (req, res) => {
   try {
@@ -1083,7 +1113,8 @@ module.exports = {
   getUniversitiesByCountry: exports.getUniversitiesByCountry,
   confirmEmailChange: exports.confirmEmailChange,
   deactivateAccount : exports.deactivateAccount,
-  uploadProfile: exports.uploadProfilePic,
+  uploadProfilePic: exports.uploadProfilePic,
+  getProfilePic: exports.getProfilePic,
   getLecturerDetails: exports.getLecturerDetails,
   deactivate2FA: exports.deactivate2FA,
 
