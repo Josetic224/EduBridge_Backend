@@ -1,6 +1,5 @@
 const { encrypt, compare } = require("../helpers/auth");
 const { getSecondsBetweenTime, timeDifference } = require("../helpers/date");
-const { notFound, badRequest } = require("../helpers/error");
 const {
   fetchCountriesData,
   fetchUniversitiesByCountry,
@@ -9,6 +8,7 @@ const {
   createAccountOtp,
   welcomeEmail,
   resetPasscodeOtp,
+  changeEmailOtp,
 } = require("../helpers/mails/otp");
 const {
   generateOTP,
@@ -30,11 +30,32 @@ const {
   setPasscodeSchema,
   VerifyPasscodeOtpSchema,
   twoFA_Schema,
+  editEmailSchema,
 } = require("../validations/user");
 const axios = require("axios");
 const dotenv = require("dotenv");
 dotenv.config();
 const jwt = require("jsonwebtoken");
+const multer = require('multer');
+const {badRequest, notFound, formatServerError} = require("../helpers/error")
+const BlacklistToken = require("../models/logout")
+
+// Multer configuration
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: "uploads/",
+    filename: (req, file, cb) => {
+      cb(null, `${Date.now()}-${file.originalname}`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image uploads are allowed."), false);
+    }
+    cb(null, true);
+  },
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB max file size
+});
 
 exports.fetchCountries = async (req, res) => {
   try {
@@ -166,9 +187,29 @@ exports.verifyUser = async (req, res) => {
     });
   }
 
-  const { email, otp } = body.data;
+  const { email, otp, requestResend } = body.data;
 
   try {
+    if (requestResend) {
+      // Generate a new OTP
+      const newOtpValue = generateOTP(); // Assuming you have a function to generate OTP
+
+      // Send the new OTP to the user's email
+      const data = {
+        to: email,
+        text: "Edubridge Forgot Password OTP",
+        subject: "New OTP To Reset Your Password",
+        html: createAccountOtp(newOtpValue), // Assuming you have a function to create OTP HTML
+      };
+      await sendEmail(data);
+
+      // Update the user's OTP in the database (assuming you have a function to do this)
+      await updateUserOtp(email, newOtpValue);
+
+      return res.status(200).json({ message: `New OTP sent to ${email}` });
+    }
+
+    // If not a resend request, proceed with OTP verification
     const { error, user } = await validateUser(email, otp);
 
     if (error) {
@@ -415,6 +456,97 @@ exports.resendVerificationOTP = async (req, res) => {
   }
 };
 
+exports.editEmail = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Authorization token is missing." });
+    }
+
+    let decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) {
+      return res.status(400).json({ error: "Invalid token: user ID missing." });
+    }
+
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    // Find current user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if new email is already taken by another user
+    const emailExists = await User.findOne({ email });
+    if (emailExists && emailExists._id.toString() !== userId) {
+      return res.status(400).json({ error: "Email already taken" });
+    }
+
+    const otpValue = generateOTP();
+    const otp = await encrypt(otpValue);
+
+    user.otp = otp;
+    user.otpExpireIn = new Date().getTime() + 5 * 60 * 1000; // 5 minutes expiry
+    await user.save();
+
+    const data = {
+      to: email,
+      text: "Edubridge Email Update OTP",
+      subject: "OTP To Confirm Email Update",
+      html: changeEmailOtp(otpValue),
+    };
+    await sendEmail(data);
+
+    return res.status(200).json({
+      message:
+        "OTP sent to the new email. Please verify to complete the change.",
+    });
+  } catch (error) {
+    console.error("EDIT EMAIL ERROR =>", error);
+    res.status(500).json({ errors: [{ error: "Server Error" }] });
+  }
+};
+
+exports.confirmEmailChange = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Authorization token is missing." });
+
+    const decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) return res.status(400).json({ error: "Invalid token: user ID missing." });
+
+    const { newEmail, otp } = req.body;
+    if (!newEmail || !otp) return res.status(400).json({ error: "New email and OTP are required." });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found." });
+
+    if (!user.otp || !user.otpExpireIn || Date.now() > user.otpExpireIn) {
+      return res.status(400).json({ error: "OTP has expired. Please request a new one." });
+    }
+
+    const emailExists = await User.findOne({ email: newEmail });
+    if (emailExists && emailExists._id.toString() !== userId) {
+      return res.status(400).json({ error: "Email is no longer available." });
+    }
+
+    user.email = newEmail;
+    user.otp = undefined;
+    user.otpExpireIn = undefined;
+    await user.save();
+
+    return res.status(200).json({ message: "Email updated successfully", newEmail: user.email });
+  } catch (error) {
+    console.error("CONFIRM EMAIL CHANGE ERROR =>", error);
+    return formatServerError(res, "Error confirming email change", error);
+  }
+};
+
 // FORGOT PASSWORD
 exports.forgotPasswordOtp = async (req, res) => {
   const { email } = req.body;
@@ -444,7 +576,6 @@ exports.forgotPasswordOtp = async (req, res) => {
       subject: "OTP To Reset Your Password",
       html: createAccountOtp(otpValue),
     };
-    await sendEmail(data);
 
     res.status(200).json({ msg: `OTP sent to ${email}` });
   } catch (error) {
@@ -584,6 +715,7 @@ exports.setPasscode = async (req, res) => {
     if (!userRecord) {
       return res.status(404).json({ error: "User not found." });
     }
+    
     // Validate request body
     const body = setPasscodeSchema.safeParse(req.body);
     if (!body.success) {
@@ -808,43 +940,6 @@ exports.editUserName = async (req, res) => {
   }
 };
 
-exports.editEmail = async (req, res) => {
-  try {
-    const token = req.headers["authorization"]?.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({ error: "Authorization token is missing." });
-    }
-
-    let decoded = decodeToken(token, process.env.JWT_SECRET);
-    const userId = decoded?.user?.userId;
-    if (!userId) {
-      return res.status(400).json({ error: "Invalid token: user ID missing." });
-    }
-
-    const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: "Email is required." });
-    }
-
-    const checkEmail = await User.findOne({ email });
-    if (checkEmail && checkEmail._id.toString() !== userId) {
-      return res.status(400).json({ error: "Email already taken" });
-    }
-
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { email },
-      { new: true }
-    );
-    return res
-      .status(200)
-      .json({ message: "Email updated successfully", user: updatedUser });
-  } catch (error) {
-    console.error("EDIT EMAIL ERROR =>", error);
-    res.status(500).json({ errors: [{ error: "Server Error" }] });
-  }
-};
-
 exports.getAllUsers = async (req, res) => {
   try {
     // Fetch all users (excluding sensitive data like passwords)
@@ -861,6 +956,112 @@ exports.getAllUsers = async (req, res) => {
     res.status(500).json({ success: false, error: "Server Error" });
   }
 };
+
+exports.deactivateAccount = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Authorization token is missing." });
+
+    const decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) return res.status(400).json({ error: "Invalid token: user ID missing." });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found." });
+
+    if (!user.isActive) return res.status(400).json({ error: "Account is already deactivated." });
+
+    user.isActive = false;
+    await user.save();
+    await BlacklistToken.create({ token });
+
+    return res.status(200).json({ message: "Account deactivated successfully." });
+  } catch (error) {
+    console.error("DEACTIVATE ACCOUNT ERROR =>", error);
+    return formatServerError(res, "Error deactivating account", error);
+  }
+};
+
+exports.uploadProfilePic = async (req, res) => {
+  upload.single("profilePic")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+
+    try {
+      const token = req.headers["authorization"]?.split(" ")[1];
+      if (!token) return res.status(401).json({ error: "Authorization token is missing." });
+
+      const decoded = decodeToken(token, process.env.JWT_SECRET);
+      const userId = decoded?.user?.userId;
+      if (!userId) return res.status(400).json({ error: "Invalid token: user ID missing." });
+
+      const user = await User.findById(userId);
+      if (!user) return res.status(404).json({ error: "User not found." });
+
+      user.profileImage = req.file.path;
+      await user.save();
+
+      return res.status(200).json({ message: "Profile image uploaded successfully", user });
+    } catch (error) {
+      console.error("UPLOAD PROFILE ERROR =>", error);
+      return formatServerError(res, "Error uploading profile picture", error);
+    }
+  });
+};
+
+exports.getLecturerDetails = async (req, res) => {
+  try {
+    const { lecturerId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(lecturerId)) {
+      return res.status(400).json({ error: "Invalid Lecturer ID format." });
+    }
+
+    const lecturer = await User.findOne(
+      { _id: lecturerId, role: "LECTURER" },
+      "userName email university country"
+    );
+
+    if (!lecturer) return res.status(404).json({ error: "Lecturer not found." });
+
+    return res.status(200).json({ success: true, data: lecturer });
+  } catch (error) {
+    console.error("GET LECTURER DETAILS ERROR =>", error);
+    return formatServerError(res, "Error fetching lecturer details", error);
+  }
+};
+
+
+
+exports.deactivate2FA = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Authorization token is missing." });
+
+    const decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) return res.status(400).json({ error: "Invalid token: user ID missing." });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found." });
+
+    if (!user.isTwoFactorEnabled) {
+      return res.status(400).json({ error: "2FA is already disabled." });
+    }
+
+    user.isTwoFactorEnabled = false;
+    user.twoFactorSecret = null;
+    await user.save();
+
+    return res.status(200).json({ message: "2FA deactivated successfully." });
+  } catch (error) {
+    console.error("DEACTIVATE 2FA ERROR =>", error);
+    return formatServerError(res, "Error deactivating 2FA", error);
+  }
+};
+
+
+
+
+
 
 module.exports = {
   fetchCountries: exports.fetchCountries,
@@ -880,4 +1081,10 @@ module.exports = {
   resetPasscode: exports.resetPasscode,
   finalizeLogin: exports.finalizeLogin,
   getUniversitiesByCountry: exports.getUniversitiesByCountry,
+  confirmEmailChange: exports.confirmEmailChange,
+  deactivateAccount : exports.deactivateAccount,
+  uploadProfile: exports.uploadProfilePic,
+  getLecturerDetails: exports.getLecturerDetails,
+  deactivate2FA: exports.deactivate2FA,
+
 };
