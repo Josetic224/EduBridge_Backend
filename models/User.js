@@ -1,6 +1,5 @@
 const mongoose = require("mongoose");
 const { Schema, model } = mongoose;
-
 const UserSchema = new Schema(
   {
     userName: {
@@ -48,7 +47,7 @@ const UserSchema = new Schema(
     },
     twoFactorSecret: {
       type: String,
-    }, // Store 2FA secret
+    },
     isTwoFactorEnabled: {
       type: Boolean,
       default: false,
@@ -57,9 +56,15 @@ const UserSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    // ✅ Add profileImage field to store the avatar URL
+    profileImage: {
+      type: String,
+      default: "", // Initially empty, will be set after upload
+    },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
+
 
 const loginHistorySchema = new mongoose.Schema(
   {

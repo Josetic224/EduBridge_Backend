@@ -22,6 +22,8 @@ const {
   uploadProfile, // Fixed function name
   getLecturerDetails,
   deactivate2FA,
+  uploadProfilePic,
+  getProfilePic,
 } = require("../../controllers/user");
 
 const { isAuthenticated } = require("../../middlewares/auth");
@@ -39,8 +41,9 @@ userRouter.post("/register", createUser);
 userRouter.put("/edit-email", isAuthenticated, editEmail);
 userRouter.put("/edit-username", isAuthenticated, editUserName);
 userRouter.put("/deactivate-account", isAuthenticated, deactivateAccount);
-userRouter.post("/upload-profile-picture",uploadProfile);
-userRouter.post("/deactivate-2FA", isAuthenticated, deactivate2FA);
+userRouter.post("/upload-profile-picture",uploadProfilePic);
+userRouter.get("/profile-picture", getProfilePic)
+userRouter.post("/deactivate-2FA",deactivate2FA);
 
 // Authentication & Verification
 userRouter.post("/otp-verification", verifyUser);
