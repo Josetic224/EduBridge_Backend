@@ -8,6 +8,9 @@ const cors = require("cors");
 const db = require("../configs/dbConfig");
 const {AppError} = require("../helpers/error");
 const { logger, expressPinoLogger } = require("../utils/logger.util");
+const {Server} = require("socket.io")
+const socketHandler = require("../sockets/socketHandler")
+require("dotenv").config()
 
 
 //App Init
@@ -18,6 +21,7 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(expressPinoLogger({ logger }));
+const io = new Server
 
 //App Home Route
 app.get("/", (req, res) => {
