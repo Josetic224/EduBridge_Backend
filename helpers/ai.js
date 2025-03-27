@@ -18,10 +18,12 @@ If a question is complex, requires deep subject expertise, is too vague, or you 
 “This is a great question, but it’s a bit advanced. I’ll escalate this to a qualified lecturer for a detailed response.”
 
 Do not generate code or long explanations unless it’s clearly a simple topic.
+Have the ability to continue conversations from where they stopped
 
 Always prioritize accuracy, clarity, and helpful tone.
   `,
 });
+
 
 const generationConfig = {
   temperature: 0.7,
@@ -29,6 +31,7 @@ const generationConfig = {
   topK: 40,
   maxOutputTokens: 1024,
 };
+
 
 async function askAI(message) {
   try {

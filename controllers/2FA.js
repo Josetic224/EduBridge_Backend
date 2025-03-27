@@ -57,7 +57,7 @@ exports.setup2FA = async (req, res) => {
       message:
         "2FA setup initiated. Scan the QR code with your authenticator app.",
       qrCodeUrl,
-      tempSecret: secret.base32, // This will be needed for verification
+      tempSecret: secret.base32, //This will be needed for verification
       otpauthUrl: secret.otpauth_url,
     });
   } catch (error) {

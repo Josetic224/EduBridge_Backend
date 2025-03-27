@@ -4,7 +4,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node ./public/http.js",
-    "dev": "nodemon ./public/http.js"
+    "dev": "NODE_ENV=development nodemon server.js"
   },
   "_moduleAliases": {
     "config": "config",
@@ -53,5 +53,6 @@
     "tsyringe": "^4.8.0",
     "ua-parser-js": "^2.0.2",
     "zod": "^3.24.1"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

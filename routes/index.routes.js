@@ -6,6 +6,7 @@ const {
   countryRouter,
 } = require("./api/user.routes");
 const { twoFA_Router } = require("./api/2FA");
+const socketRouter = require("./api/socket.routes");
 
 // define routes
 module.exports = function routes(app) {
@@ -18,4 +19,5 @@ module.exports = function routes(app) {
   app.use("/api/countries", countryRouter);
   app.use("/api/universities", universityRouter);
   app.use("/api", twoFA_Router);
+  app.use("/api/socket", socketRouter); // Add socket test routes
 };
