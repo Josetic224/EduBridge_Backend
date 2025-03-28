@@ -1,6 +1,4 @@
-const ChatRoom = require("../models/ChatRoom");
 const Message = require("../models/Message");
-const User = require("../models/User");
 const { decodeToken } = require("../helpers/token");
 const { askAI } = require("../helpers/ai");
 require("dotenv").config();

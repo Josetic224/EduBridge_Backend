@@ -26,7 +26,8 @@ const {
   getProfilePic,
   getUserProfile,
   deleteAccount,
-  confirmEmailChange
+  confirmEmailChange,
+  getSpecialtiesAndDepartments
 } = require("../../controllers/user");
 
 const { isAuthenticated } = require("../../middlewares/auth");
@@ -74,6 +75,9 @@ lecturerRouter.get("/:lecturerId", getLecturerDetails); // Fetch lecturer by ID
 countriesRouter.get("/fetchCountries", fetchCountries);
 countriesRouter.get("/all", fetchCountries);
 universityRouter.get("/countries/:country", getUniversitiesByCountry);
+
+//Specialities and Departments
+userRouter.get("/specialties-and-departments", getSpecialtiesAndDepartments);
 
 module.exports = {
   userRouter,
