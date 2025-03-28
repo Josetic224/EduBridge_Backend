@@ -1137,6 +1137,38 @@ exports.deleteAccount = async (req, res) => {
   }
 };
 
+
+exports.getSpecialtiesAndDepartments = (req, res) => {
+  const specialties = [
+    "Mathematics",
+    "Computer Science",
+    "Physics",
+    "Chemistry",
+    "Biology",
+    "Engineering",
+    "Literature",
+    "History",
+    "Art",
+    "Music",
+  ];
+
+  const departments = [
+    "Mathematics",
+    "Computer Science",
+    "Natural Sciences",
+    "Engineering",
+    "Humanities",
+    "Arts",
+    "Social Sciences",
+    "Business",
+  ];
+
+  res.status(200).json({
+    specialties,
+    departments,
+  });
+};
+
 module.exports = {
   fetchCountries: exports.fetchCountries,
   createUser: exports.createUser,
@@ -1163,4 +1195,5 @@ module.exports = {
   deactivate2FA: exports.deactivate2FA,
   getUserProfile: exports.getUserProfile,
   deleteAccount: exports.deleteAccount,
+  getSpecialtiesAndDepartments: exports.getSpecialtiesAndDepartments,
 };

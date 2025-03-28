@@ -1,5 +1,21 @@
 const z = require("zod");
 
+
+// Define the list of specialties
+const specialties = [
+  "Mathematics",
+  "Computer Science",
+  "Physics",
+  "Chemistry",
+  "Biology",
+  "Engineering",
+  "Literature",
+  "History",
+  "Art",
+  "Music",
+];
+
+
 const UserSchema = z
   .object({
     userName: z.string({
@@ -16,8 +32,27 @@ const UserSchema = z
     university: z.string(),
     country: z.string(),
     passcode: z.string().min(4, "Passcode is too Short").optional(),
+    specialty: z.string().optional().refine((val, ctx) => {
+      if (ctx.parent.role === "LECTURER" && !val) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Specialty is required for lecturers",
+        });
+      }
+      return true;
+    }),
+    department: z.string().optional().refine((val, ctx) => {
+      if (ctx.parent.role === "LECTURER" && !val) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Department is required for lecturers",
+        });
+      }
+      return true;
+    }),
   })
   .strict();
+
 
 const VerifyUserSchema = z
   .object({
