@@ -52,8 +52,7 @@ exports.testSocketMessage = async (req, res) => {
         headers: JSON.stringify(req.headers, null, 2),
         body: JSON.stringify(req.body, null, 2)
     });
-
-    try {
+   try {
         // Enhanced token extraction
         const authHeader = req.headers["authorization"];
         logger.debug("Authorization Header", { header: authHeader });   

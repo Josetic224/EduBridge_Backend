@@ -24,6 +24,9 @@ const {
   deactivate2FA,
   uploadProfilePic,
   getProfilePic,
+  getUserProfile,
+  deleteAccount,
+  confirmEmailChange
 } = require("../../controllers/user");
 
 const { isAuthenticated } = require("../../middlewares/auth");
@@ -38,9 +41,12 @@ const countryRouter = Router();
 
 // User Registration & Account Management
 userRouter.post("/register", createUser);
-userRouter.put("/edit-email", isAuthenticated, editEmail);
+userRouter.put("/edit-email", editEmail);
 userRouter.put("/edit-username", isAuthenticated, editUserName);
+userRouter.post("/confirm-email-change",confirmEmailChange);
 userRouter.put("/deactivate-account", isAuthenticated, deactivateAccount);
+userRouter.delete("/delete-account", deleteAccount);
+userRouter.get("/profile",getUserProfile);
 userRouter.post("/upload-profile-picture",uploadProfilePic);
 userRouter.get("/profile-picture", getProfilePic)
 userRouter.post("/deactivate-2FA",deactivate2FA);

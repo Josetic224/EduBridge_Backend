@@ -1093,6 +1093,50 @@ exports.deactivate2FA = async (req, res) => {
 
 
 
+exports.getUserProfile = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Authorization token is missing." });
+
+    const decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) return res.status(400).json({ error: "Invalid token: user ID missing." });
+
+    const user = await User.findById(userId).select("-password -passcode -otp -otpExpireIn -twoFactorSecret");
+    if (!user) return res.status(404).json({ error: "User not found." });
+
+    return res.status(200).json({ success: true, data: user });
+  } catch (error) {
+    console.error("GET USER PROFILE ERROR =>", error);
+    return formatServerError(res, "Error fetching user profile", error);
+  }
+};
+
+exports.deleteAccount = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Authorization token is missing." });
+
+    const decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) return res.status(400).json({ error: "Invalid token: user ID missing." });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found." });
+
+    // Add token to blacklist to invalidate it
+    await BlacklistToken.create({ token });
+    
+    // Delete the user account
+    await User.findByIdAndDelete(userId);
+
+    return res.status(200).json({ message: "Account deleted successfully." });
+  } catch (error) {
+    console.error("DELETE ACCOUNT ERROR =>", error);
+    return formatServerError(res, "Error deleting account", error);
+  }
+};
+
 module.exports = {
   fetchCountries: exports.fetchCountries,
   createUser: exports.createUser,
@@ -1117,5 +1161,6 @@ module.exports = {
   getProfilePic: exports.getProfilePic,
   getLecturerDetails: exports.getLecturerDetails,
   deactivate2FA: exports.deactivate2FA,
-
+  getUserProfile: exports.getUserProfile,
+  deleteAccount: exports.deleteAccount,
 };
