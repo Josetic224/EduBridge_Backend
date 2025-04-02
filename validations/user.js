@@ -1,6 +1,5 @@
 const z = require("zod");
 
-
 // Define the list of specialties
 const specialties = [
   "Mathematics",
@@ -14,7 +13,6 @@ const specialties = [
   "Art",
   "Music",
 ];
-
 
 const UserSchema = z
   .object({
@@ -32,27 +30,27 @@ const UserSchema = z
     university: z.string(),
     country: z.string(),
     passcode: z.string().min(4, "Passcode is too Short").optional(),
-    specialty: z.string().optional().refine((val, ctx) => {
-      if (ctx.parent.role === "LECTURER" && !val) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Specialty is required for lecturers",
-        });
-      }
-      return true;
-    }),
-    department: z.string().optional().refine((val, ctx) => {
-      if (ctx.parent.role === "LECTURER" && !val) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Department is required for lecturers",
-        });
-      }
-      return true;
-    }),
+    specialty: z.string().optional(),
+    department: z.string().optional(),
   })
-  .strict();
-
+  .strict()
+  .superRefine((data, ctx) => {
+    if (data.role === "LECTURER" && !data.specialty) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Specialty is required for lecturers",
+        path: ["specialty"],
+      });
+    }
+    
+    if (data.role === "LECTURER" && !data.department) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Department is required for lecturers",
+        path: ["department"],
+      });
+    }
+  });
 
 const VerifyUserSchema = z
   .object({
