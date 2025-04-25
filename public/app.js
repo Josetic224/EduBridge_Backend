@@ -5,6 +5,7 @@ const cors = require("cors");
 const db = require("../configs/dbConfig");
 const {AppError} = require("../helpers/error");
 const { logger, expressPinoLogger } = require("../utils/logger.util");
+const initializeSocket = require("../socket");
 
 // Create Express app
 const app = express();
@@ -17,6 +18,10 @@ app.use(expressPinoLogger({ logger }));
 
 // Create HTTP server
 const http = require('http').createServer(app);
+
+// Initialize Socket.IO
+const io = initializeSocket(http);
+app.set('io', io); // Make io available to routes via req.app.get('io')
 
 //App Home Route
 app.get("/", (req, res) => {

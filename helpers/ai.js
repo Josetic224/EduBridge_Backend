@@ -33,6 +33,11 @@ const generationConfig = {
 };
 
 
+/**
+ * Asks the Gemini AI assistant a question and returns the response.
+ * @param {string} message The question to ask the AI assistant.
+ * @returns {Promise<{answer: string}|{error: string}>} The response from the AI assistant if it was successful, or an error message if it failed.
+ */
 async function askAI(message) {
   try {
     const chat = model.startChat({ generationConfig });

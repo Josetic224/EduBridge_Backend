@@ -1,6 +1,9 @@
 const Message = require("../models/Message");
+const ChatRoom = require("../models/ChatRoom");
+const User = require("../models/User");
 const { decodeToken } = require("../helpers/token");
 const { askAI } = require("../helpers/ai");
+const { askAIWithEscalation, handleQueryEscalation } = require("../helpers/aiEscalation");
 require("dotenv").config();
 
 // Centralized logging utility
@@ -103,9 +106,9 @@ exports.testSocketMessage = async (req, res) => {
             detectedSubject: subject || "No specific subject"
         });
 
-        // AI Response Generation
-        logger.debug("Calling Gemini AI");
-        const aiResult = await askAI(message);
+        // AI Response Generation with Escalation Detection
+        logger.debug("Calling Gemini AI with Escalation Detection");
+        const aiResult = await askAIWithEscalation(message);
         
         if (aiResult.error) {
             logger.error("AI Response Generation Failed", { error: aiResult.error });
@@ -117,8 +120,11 @@ exports.testSocketMessage = async (req, res) => {
         }
 
         const aiResponse = aiResult.answer;
+        const shouldEscalate = aiResult.shouldEscalate;
+        
         logger.info("AI Response Generated", { 
-            responseLength: aiResponse.length 
+            responseLength: aiResponse.length,
+            shouldEscalate
         });
 
         // Socket Event Emission
@@ -133,9 +139,36 @@ exports.testSocketMessage = async (req, res) => {
                 data: {
                     message: aiResponse,
                     subject,
-                    timestamp: new Date()
+                    timestamp: new Date(),
+                    escalated: shouldEscalate
                 }
             });
+            
+            // Handle escalation if needed
+            if (shouldEscalate) {
+                logger.info("Escalating query to human lecturer", { userId, subject });
+                
+                const escalationResult = await handleQueryEscalation(userId, message, aiResponse, io);
+                
+                if (escalationResult.success) {
+                    logger.info("Query successfully escalated", {
+                        chatRoomId: escalationResult.chatRoomId,
+                        lecturerId: escalationResult.lecturerId
+                    });
+                    
+                    // Notify the student that their query has been escalated
+                    io.to(userId).emit('query-escalated', {
+                        success: true,
+                        data: {
+                            message: "Your question has been sent to a lecturer. They will respond in the chat section.",
+                            chatRoomId: escalationResult.chatRoomId,
+                            timestamp: new Date()
+                        }
+                    });
+                } else {
+                    logger.error("Query escalation failed", { error: escalationResult.error });
+                }
+            }
         } else {
             logger.error("No Socket.IO Instance Available");
         }

@@ -27,7 +27,11 @@ const {
   getUserProfile,
   deleteAccount,
   confirmEmailChange,
-  getSpecialtiesAndDepartments
+  getSpecialtiesAndDepartments,
+  createFAQ,
+  getAllFAQs,
+  updateFAQ,
+  deleteFAQ
 } = require("../../controllers/user");
 
 const { isAuthenticated } = require("../../middlewares/auth");
@@ -43,9 +47,9 @@ const countryRouter = Router();
 // User Registration & Account Management
 userRouter.post("/register", createUser);
 userRouter.put("/edit-email", editEmail);
-userRouter.put("/edit-username", isAuthenticated, editUserName);
+userRouter.put("/edit-username", editUserName);
 userRouter.post("/confirm-email-change",confirmEmailChange);
-userRouter.put("/deactivate-account", isAuthenticated, deactivateAccount);
+userRouter.put("/deactivate-account",deactivateAccount);
 userRouter.delete("/delete-account", deleteAccount);
 userRouter.get("/profile",getUserProfile);
 userRouter.post("/upload-profile-picture",uploadProfilePic);
@@ -78,6 +82,12 @@ universityRouter.get("/countries/:country", getUniversitiesByCountry);
 
 //Specialities and Departments
 userRouter.get("/specialties-and-departments", getSpecialtiesAndDepartments);
+
+// FAQ Routes
+userRouter.post("/faqs", createFAQ);
+userRouter.get("/faqs", getAllFAQs);
+userRouter.put("/faqs/:faqId", updateFAQ);
+userRouter.delete("/faqs/:faqId", deleteFAQ);
 
 module.exports = {
   userRouter,
