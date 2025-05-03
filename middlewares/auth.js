@@ -19,8 +19,13 @@ const isAuthenticated = async (req, res, next) => {
       return unAuthenticated(res, "You need to login first." );
     }
     // Verify token
-    const decoded = jwt.verify(token, process.env.TOKEN_SECRET_KEY);
-    req.user._id = decoded.user;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Set user information in the request object
+    req.user = {
+      id: decoded.user.userId,
+      email: decoded.user.email
+    };
 
     // Check if the token is blacklisted
     const isBlacklisted = await BlacklistToken.exists({token});
@@ -33,7 +38,8 @@ const isAuthenticated = async (req, res, next) => {
     } 
     next();
   } catch (error) {
-    res.status(500).json( error );
+    console.error("Authentication error:", error);
+    return res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 

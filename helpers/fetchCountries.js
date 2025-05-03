@@ -9,6 +9,13 @@ const fetchCountriesData = async () => {
     );
 
     // Map and process the country data
+    /**
+     * Maps over the country data to extract and format necessary fields.
+     * Each country object is transformed to include:
+     * - name: The common name of the country.
+     * - code: The lowercased country code (CCA2).
+     * - flag: The URL to the country's flag image.
+     */
     const countries = response.data.map((country) => ({
       name: country.name.common,
       code: country.cca2.toLowerCase(),
@@ -33,6 +40,7 @@ const fetchCountryByName = async (countryName) => {
     );
 
     const country = response.data.find(
+      // Check if the country name matches the given country name (case-insensitive)
       (country) =>
         country.name.common.toLowerCase() === countryName.toLowerCase(),
     );

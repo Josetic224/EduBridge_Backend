@@ -17,7 +17,10 @@ const {
   decodeToken,
   generateTempToken,
 } = require("../helpers/token");
+const mongoose = require("mongoose");
+const ChatRoom = require("../models/ChatRoom");
 const User = require("../models/User");
+const FAQ = require("../models/FAQ");
 const { validateUser } = require("../services/auth");
 const sendEmail = require("../services/email");
 const speakeasy = require("speakeasy");
@@ -90,7 +93,6 @@ exports.createUser = async (req, res) => {
       errors: body.error.issues,
     });
   }
-
   const { userName, email, password, role, university, country } = body.data;
 
   try {
@@ -103,7 +105,6 @@ exports.createUser = async (req, res) => {
     if (checkEmail) {
       return badRequest(res, "Email already taken");
     }
-
     if (!["STUDENT", "LECTURER"].includes(role)) {
       return res.status(400).json({ error: "Invalid Role" });
     }
@@ -318,12 +319,12 @@ exports.userLogin = async (req, res) => {
     // Check if 2FA is enabled
     if (checkUser.isTwoFactorEnabled) {
       // Generate a temporary token for 2FA verification
-      const tempToken = generateToken(userId, email);
+      const authToken = generateToken(userId, email);
 
       console.log("Generated temp token for 2FA:", {
         userId,
         email,
-        token: tempToken,
+        token: authToken,
       });
 
       return res.status(200).json({
@@ -504,6 +505,43 @@ exports.editEmail = async (req, res) => {
     });
   } catch (error) {
     console.error("EDIT EMAIL ERROR =>", error);
+    res.status(500).json({ errors: [{ error: "Server Error" }] });
+  }
+};
+
+exports.editUserName = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Authorization token is missing." });
+    }
+
+    let decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) {
+      return res.status(400).json({ error: "Invalid token: user ID missing." });
+    }
+
+    const { userName } = req.body;
+    if (!userName) {
+      return res.status(400).json({ error: "Username is required." });
+    }
+
+    const checkUserName = await User.findOne({ userName });
+    if (checkUserName && checkUserName._id.toString() !== userId) {
+      return res.status(400).json({ error: "Username already taken" });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { userName },
+      { new: true }
+    );
+    return res
+      .status(200)
+      .json({ message: "Username updated successfully", user: updatedUser });
+  } catch (error) {
+    console.error("EDIT USERNAME ERROR =>", error);
     res.status(500).json({ errors: [{ error: "Server Error" }] });
   }
 };
@@ -1057,6 +1095,289 @@ exports.getLecturerDetails = async (req, res) => {
     console.error("GET LECTURER DETAILS ERROR =>", error);
     return formatServerError(res, "Error fetching lecturer details", error);
   }
+}
+
+exports.getLecturersByUniversity = async (req, res) => {
+  try {
+    // Get the authenticated user
+    const userId = req.user.id;
+    
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Invalid User ID format." });
+    }
+    
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    // Get the user's university
+    const userUniversity = user.university;
+    
+    // Find all lecturers from the same university
+    const lecturers = await User.find(
+      { role: "LECTURER", university: userUniversity, isActive: true },
+      "userName email university country profilePicture"
+    );
+    
+    return res.status(200).json({ success: true, data: lecturers });
+  } catch (error) {
+    console.error("GET LECTURERS BY UNIVERSITY ERROR =>", error);
+    return formatServerError(res, "Error fetching lecturers by university", error);
+  }
+}
+
+exports.getLecturersByCourse = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(courseId)) {
+      return res.status(400).json({ error: "Invalid Course ID format." });
+    }
+    
+    // Find the course
+    const Course = require("../models/Course");
+    const course = await Course.findById(courseId);
+    
+    if (!course) {
+      return res.status(404).json({ error: "Course not found" });
+    }
+    
+    // Find the lecturer of this course
+    const lecturer = await User.findOne(
+      { _id: course.lecturer, role: "LECTURER", isActive: true },
+      "userName email university country profilePicture"
+    );
+    
+    if (!lecturer) {
+      return res.status(404).json({ error: "Lecturer not found" });
+    }
+    
+    return res.status(200).json({ success: true, data: lecturer });
+  } catch (error) {
+    console.error("GET LECTURERS BY COURSE ERROR =>", error);
+    return formatServerError(res, "Error fetching lecturers by course", error);
+  }
+}
+
+exports.followLecturer = async (req, res) => {
+  try {
+    const { lecturerId } = req.params;
+    const userId = req.user._id;
+    
+    if (!mongoose.Types.ObjectId.isValid(lecturerId) || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Invalid ID format." });
+    }
+    
+    // Check if the user is a student
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    if (user.role !== "STUDENT") {
+      return res.status(403).json({ error: "Only students can follow lecturers" });
+    }
+    
+    // Check if the lecturer exists
+    const lecturer = await User.findOne({ 
+      _id: lecturerId, 
+      role: "LECTURER",
+      isActive: true 
+    });
+    
+    if (!lecturer) {
+      return res.status(404).json({ error: "Lecturer not found" });
+    }
+    
+    // Initialize followedLecturers array if it doesn't exist
+    if (!user.followedLecturers) {
+      user.followedLecturers = [];
+    }
+    
+    // Check if already following
+    if (user.followedLecturers.some(id => id.toString() === lecturerId)) {
+      return res.status(400).json({ error: "Already following this lecturer" });
+    }
+    
+    // Add lecturer to followed list
+    user.followedLecturers.push(lecturerId);
+    await user.save();
+    
+    return res.status(200).json({ 
+      success: true,
+      message: "Successfully followed lecturer",
+      data: {
+        _id: lecturer._id,
+        userName: lecturer.userName,
+        email: lecturer.email,
+        university: lecturer.university
+      }
+    });
+  } catch (error) {
+    console.error("FOLLOW LECTURER ERROR =>", error);
+    return formatServerError(res, "Error following lecturer", error);
+  }
+}
+
+exports.unfollowLecturer = async (req, res) => {
+  try {
+    const { lecturerId } = req.params;
+    const userId = req.user._id;
+    
+    if (!mongoose.Types.ObjectId.isValid(lecturerId) || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Invalid ID format." });
+    }
+    
+    // Check if the user exists
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    if (user.role !== "STUDENT") {
+      return res.status(403).json({ error: "Only students can unfollow lecturers" });
+    }
+    
+    // Check if the user is following this lecturer
+    if (!user.followedLecturers || !user.followedLecturers.some(id => id.toString() === lecturerId)) {
+      return res.status(400).json({ error: "Not following this lecturer" });
+    }
+    
+    // Remove lecturer from followed list
+    user.followedLecturers = user.followedLecturers.filter(
+      id => id.toString() !== lecturerId
+    );
+    await user.save();
+    
+    return res.status(200).json({ 
+      success: true,
+      message: "Successfully unfollowed lecturer" 
+    });
+  } catch (error) {
+    console.error("UNFOLLOW LECTURER ERROR =>", error);
+    return formatServerError(res, "Error unfollowing lecturer", error);
+  }
+}
+
+exports.getFollowedLecturers = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Invalid User ID format." });
+    }
+    
+    // Get the user
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    if (user.role !== "STUDENT") {
+      return res.status(403).json({ error: "Only students can view followed lecturers" });
+    }
+    
+    // If user has no followed lecturers, return empty array
+    if (!user.followedLecturers || user.followedLecturers.length === 0) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+    
+    // Get details of all followed lecturers
+    const followedLecturers = await User.find(
+      { _id: { $in: user.followedLecturers }, role: "LECTURER", isActive: true },
+      "userName email university country profileImage"
+    );
+    
+    return res.status(200).json({ 
+      success: true, 
+      count: followedLecturers.length,
+      data: followedLecturers 
+    });
+  } catch (error) {
+    console.error("GET FOLLOWED LECTURERS ERROR =>", error);
+    return formatServerError(res, "Error getting followed lecturers", error);
+  }
+};
+
+/**
+ * Get all followed lecturers with chat status
+ * @route GET /api/lecturer/following-with-chat
+ * @access Private (Student only)
+ */
+exports.getFollowedLecturersWithChatStatus = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: "Invalid User ID format." });
+    }
+    
+    // Get the user
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    if (user.role !== "STUDENT") {
+      return res.status(403).json({ error: "Only students can view followed lecturers" });
+    }
+    
+    // If user has no followed lecturers, return empty array
+    if (!user.followedLecturers || user.followedLecturers.length === 0) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+    
+    // Get details of all followed lecturers
+    const followedLecturers = await User.find(
+      { _id: { $in: user.followedLecturers }, role: "LECTURER", isActive: true },
+      "userName email university country profileImage"
+    );
+    
+    // Get all chat rooms where the user is a participant
+    const chatRooms = await ChatRoom.find({
+      participants: userId
+    });
+    
+    // Create a map of lecturer IDs to chat room IDs
+    const lecturerChatMap = {};
+    chatRooms.forEach(room => {
+      room.participants.forEach(participantId => {
+        const participantIdStr = participantId.toString();
+        if (participantIdStr !== userId) {
+          lecturerChatMap[participantIdStr] = room._id;
+        }
+      });
+    });
+    
+    // Add chat room information to each lecturer
+    const lecturersWithChatStatus = followedLecturers.map(lecturer => {
+      const lecturerId = lecturer._id.toString();
+      return {
+        _id: lecturer._id,
+        userName: lecturer.userName,
+        email: lecturer.email,
+        university: lecturer.university,
+        country: lecturer.country,
+        profileImage: lecturer.profileImage,
+        hasChatRoom: !!lecturerChatMap[lecturerId],
+        chatRoomId: lecturerChatMap[lecturerId] || null
+      };
+    });
+    
+    return res.status(200).json({ 
+      success: true, 
+      count: lecturersWithChatStatus.length,
+      data: lecturersWithChatStatus 
+    });
+  } catch (error) {
+    console.error("GET FOLLOWED LECTURERS WITH CHAT STATUS ERROR =>", error);
+    return formatServerError(res, "Error getting followed lecturers with chat status", error);
+  }
 };
 
 
@@ -1169,6 +1490,131 @@ exports.getSpecialtiesAndDepartments = (req, res) => {
   });
 };
 
+exports.createFAQ = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Authorization token is missing." });
+    }
+
+    let decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) {
+      return res.status(400).json({ error: "Invalid token: user ID missing." });
+    }
+
+    const { question, description } = req.body;
+    
+    if (!question || !description) {
+      return res.status(400).json({ error: "Question and description are required." });
+    }
+
+    const newFAQ = new FAQ({
+      question,
+      description
+    });
+
+    await newFAQ.save();
+
+    return res.status(201).json({
+      message: "FAQ created successfully",
+      faq: newFAQ
+    });
+  } catch (error) {
+    console.error("CREATE FAQ ERROR =>", error);
+    return res.status(500).json({ error: "Server error while creating FAQ" });
+  }
+};
+
+exports.getAllFAQs = async (req, res) => {
+  try {
+    const faqs = await FAQ.find().sort({ createdAt: -1 });
+    
+    return res.status(200).json({
+      message: "FAQs retrieved successfully",
+      faqs
+    });
+  } catch (error) {
+    console.error("GET ALL FAQs ERROR =>", error);
+    return res.status(500).json({ error: "Server error while retrieving FAQs" });
+  }
+};
+
+exports.updateFAQ = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Authorization token is missing." });
+    }
+
+    let decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) {
+      return res.status(400).json({ error: "Invalid token: user ID missing." });
+    }
+
+    const { faqId } = req.params;
+    const { question, description } = req.body;
+
+    if (!faqId) {
+      return res.status(400).json({ error: "FAQ ID is required." });
+    }
+
+    const updatedFAQ = await FAQ.findByIdAndUpdate(
+      faqId, 
+      { question, description }, 
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedFAQ) {
+      return res.status(404).json({ error: "FAQ not found" });
+    }
+
+    return res.status(200).json({
+      message: "FAQ updated successfully",
+      faq: updatedFAQ
+    });
+  } catch (error) {
+    console.error("UPDATE FAQ ERROR =>", error);
+    return res.status(500).json({ error: "Server error while updating FAQ" });
+  }
+};
+
+exports.deleteFAQ = async (req, res) => {
+  try {
+    const token = req.headers["authorization"]?.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Authorization token is missing." });
+    }
+
+    let decoded = decodeToken(token, process.env.JWT_SECRET);
+    const userId = decoded?.user?.userId;
+    if (!userId) {
+      return res.status(400).json({ error: "Invalid token: user ID missing." });
+    }
+
+    const { faqId } = req.params;
+
+    if (!faqId) {
+      return res.status(400).json({ error: "FAQ ID is required." });
+    }
+
+    const deletedFAQ = await FAQ.findByIdAndDelete(faqId);
+
+    if (!deletedFAQ) {
+      return res.status(404).json({ error: "FAQ not found" });
+    }
+
+    return res.status(200).json({
+      message: "FAQ deleted successfully",
+      faq: deletedFAQ
+    });
+  } catch (error) {
+    console.error("DELETE FAQ ERROR =>", error);
+    return res.status(500).json({ error: "Server error while deleting FAQ" });
+  }
+};
+
 module.exports = {
   fetchCountries: exports.fetchCountries,
   createUser: exports.createUser,
@@ -1192,8 +1638,18 @@ module.exports = {
   uploadProfilePic: exports.uploadProfilePic,
   getProfilePic: exports.getProfilePic,
   getLecturerDetails: exports.getLecturerDetails,
+  getLecturersByUniversity: exports.getLecturersByUniversity,
+  getLecturersByCourse: exports.getLecturersByCourse,
+  followLecturer: exports.followLecturer,
+  unfollowLecturer: exports.unfollowLecturer,
+  getFollowedLecturers: exports.getFollowedLecturers,
+  getFollowedLecturersWithChatStatus: exports.getFollowedLecturersWithChatStatus,
   deactivate2FA: exports.deactivate2FA,
   getUserProfile: exports.getUserProfile,
   deleteAccount: exports.deleteAccount,
   getSpecialtiesAndDepartments: exports.getSpecialtiesAndDepartments,
+  createFAQ: exports.createFAQ,
+  getAllFAQs: exports.getAllFAQs,
+  updateFAQ: exports.updateFAQ,
+  deleteFAQ: exports.deleteFAQ,
 };

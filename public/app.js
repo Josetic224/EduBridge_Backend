@@ -5,6 +5,8 @@ const cors = require("cors");
 const db = require("../configs/dbConfig");
 const {AppError} = require("../helpers/error");
 const { logger, expressPinoLogger } = require("../utils/logger.util");
+const initializeSocket = require("../socket");
+const { swaggerDocs } = require("../configs/swagger");
 
 // Create Express app
 const app = express();
@@ -18,6 +20,10 @@ app.use(expressPinoLogger({ logger }));
 // Create HTTP server
 const http = require('http').createServer(app);
 
+// Initialize Socket.IO
+const io = initializeSocket(http);
+app.set('io', io); // Make io available to routes via req.app.get('io')
+
 //App Home Route
 app.get("/", (req, res) => {
   res.send("Welcome to Edubridge Backend");
@@ -28,6 +34,9 @@ require("../routes/index.routes")(app);
 
 //calling the db connection
 db();
+
+// Initialize Swagger documentation
+swaggerDocs(app);
 
 app.use((error, req, res, next) => {
     error.status = error.status || "error";
