@@ -125,6 +125,9 @@ function initializeSocket(http) {
                 const chatRoom = await ChatRoom.findOne({
                     _id: chatRoomId,
                     participants: userId
+                }).populate({
+                    path: 'participants',
+                    select: '_id role'
                 });
                 
                 if (!chatRoom) {
@@ -157,12 +160,130 @@ function initializeSocket(http) {
                 if (socket.user.role === "LECTURER" && chatRoom.isEscalated) {
                     chatRoom.isEscalated = false;
                     await chatRoom.save();
+                    
+                    // Notify the student that their query has been addressed
+                    const student = chatRoom.participants.find(p => p.role === "STUDENT");
+                    if (student) {
+                        io.to(student._id.toString()).emit("lecturer-response", {
+                            chatRoomId,
+                            message: "A lecturer has responded to your query"
+                        });
+                    }
                 }
+                
+                // Send notification to other participants
+                chatRoom.participants.forEach(participant => {
+                    if (participant._id.toString() !== userId) {
+                        io.to(participant._id.toString()).emit("new-message-notification", {
+                            chatRoomId,
+                            sender: {
+                                _id: socket.user._id,
+                                userName: socket.user.userName,
+                                role: socket.user.role
+                            },
+                            preview: content.substring(0, 50) + (content.length > 50 ? "..." : ""),
+                            timestamp: new Date()
+                        });
+                    }
+                });
                 
                 logger.debug("Message sent", { userId, chatRoomId });
             } catch (error) {
                 logger.error("Error sending message:", error);
                 socket.emit("error", { message: "Failed to send message" });
+            }
+        });
+        
+        // Handle initiating a chat with a lecturer
+        socket.on("initiate-lecturer-chat", async (data) => {
+            try {
+                const { lecturerId } = data;
+                
+                // Validate input
+                if (!lecturerId) {
+                    socket.emit("error", { message: "Lecturer ID is required" });
+                    return;
+                }
+                
+                // Check if the user is a student
+                if (socket.user.role !== "STUDENT") {
+                    socket.emit("error", { message: "Only students can initiate chats with lecturers" });
+                    return;
+                }
+                
+                // Check if the lecturer exists
+                const lecturer = await User.findOne({ 
+                    _id: lecturerId, 
+                    role: "LECTURER",
+                    isActive: true 
+                });
+                
+                if (!lecturer) {
+                    socket.emit("error", { message: "Lecturer not found" });
+                    return;
+                }
+                
+                // Check if the student follows this lecturer
+                const student = await User.findById(userId);
+                if (!student.followedLecturers || !student.followedLecturers.some(id => id.toString() === lecturerId)) {
+                    socket.emit("error", { message: "You can only chat with lecturers you follow" });
+                    return;
+                }
+                
+                // Check if a chat room already exists between these users
+                let chatRoom = await ChatRoom.findOne({
+                    participants: { $all: [userId, lecturerId] }
+                });
+                
+                // If no chat room exists, create one
+                if (!chatRoom) {
+                    chatRoom = new ChatRoom({
+                        participants: [userId, lecturerId]
+                    });
+                    await chatRoom.save();
+                    
+                    // Create a welcome message
+                    const welcomeMessage = new Message({
+                        room: chatRoom._id,
+                        sender: null, // System message
+                        content: `Chat started between ${student.userName} and ${lecturer.userName}.`
+                    });
+                    await welcomeMessage.save();
+                    
+                    // Notify the lecturer about the new chat
+                    io.to(lecturerId).emit("new-student-chat", {
+                        chatRoomId: chatRoom._id,
+                        student: {
+                            _id: student._id,
+                            userName: student.userName,
+                            email: student.email
+                        },
+                        timestamp: new Date()
+                    });
+                }
+                
+                // Join the chat room
+                socket.join(chatRoom._id.toString());
+                
+                // Send success response
+                socket.emit("chat-initiated", {
+                    success: true,
+                    chatRoomId: chatRoom._id,
+                    lecturer: {
+                        _id: lecturer._id,
+                        userName: lecturer.userName,
+                        email: lecturer.email
+                    }
+                });
+                
+                logger.debug("Chat initiated with lecturer", { 
+                    studentId: userId, 
+                    lecturerId, 
+                    chatRoomId: chatRoom._id 
+                });
+            } catch (error) {
+                logger.error("Error initiating chat with lecturer:", error);
+                socket.emit("error", { message: "Failed to initiate chat with lecturer" });
             }
         });
         

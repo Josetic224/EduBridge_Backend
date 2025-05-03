@@ -61,6 +61,11 @@ const UserSchema = new Schema(
       type: String,
       default: "", // Initially empty, will be set after upload
     },
+    // Array of lecturer IDs that the student is following
+    followedLecturers: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }],
   },
   { timestamps: true }
 );

@@ -21,6 +21,12 @@ const {
   deactivateAccount,
   uploadProfile, // Fixed function name
   getLecturerDetails,
+  getLecturersByUniversity,
+  getLecturersByCourse,
+  followLecturer,
+  unfollowLecturer,
+  getFollowedLecturers,
+  getFollowedLecturersWithChatStatus,
   deactivate2FA,
   uploadProfilePic,
   getProfilePic,
@@ -73,7 +79,13 @@ userRouter.post("/2FA-login", finalizeLogin);
 
 // Fetching Users & Lecturers
 userRouter.get("/all", isAuthenticated, getAllUsers);
+lecturerRouter.get("/university", isAuthenticated, getLecturersByUniversity); // Get lecturers in same university
+lecturerRouter.get("/course/:courseId", isAuthenticated, getLecturersByCourse); // Get lecturers by course
+lecturerRouter.get("/following", isAuthenticated, getFollowedLecturers); // Get followed lecturers
+lecturerRouter.get("/following-with-chat", isAuthenticated, getFollowedLecturersWithChatStatus); // Get followed lecturers with chat status
 lecturerRouter.get("/:lecturerId", getLecturerDetails); // Fetch lecturer by ID
+lecturerRouter.post("/:lecturerId/follow", isAuthenticated, followLecturer); // Follow a lecturer
+lecturerRouter.post("/:lecturerId/unfollow", isAuthenticated, unfollowLecturer); // Unfollow a lecturer
 
 // Country & University Data
 countriesRouter.get("/fetchCountries", fetchCountries);

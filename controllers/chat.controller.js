@@ -2,6 +2,7 @@ const ChatRoom = require("../models/ChatRoom");
 const Message = require("../models/Message");
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 
 // Centralized logging utility
 const logger = {
@@ -275,9 +276,132 @@ const sendChatMessage = async (req, res) => {
     }
 };
 
+/**
+ * Create a chat room between a student and a lecturer they follow
+ * @route POST /api/chats/create-with-lecturer/:lecturerId
+ * @access Private (Student only)
+ */
+const createChatWithLecturer = async (req, res) => {
+    try {
+        const { lecturerId } = req.params;
+        const userId = req.user._id;
+        
+        // Validate IDs
+        if (!mongoose.Types.ObjectId.isValid(lecturerId) || !mongoose.Types.ObjectId.isValid(userId)) {
+            return res.status(400).json({ 
+                success: false,
+                error: "Invalid ID format." 
+            });
+        }
+        
+        // Check if the user is a student
+        const student = await User.findById(userId);
+        if (!student) {
+            return res.status(404).json({ 
+                success: false,
+                error: "User not found" 
+            });
+        }
+        
+        if (student.role !== "STUDENT") {
+            return res.status(403).json({ 
+                success: false,
+                error: "Only students can initiate chats with lecturers" 
+            });
+        }
+        
+        // Check if the lecturer exists
+        const lecturer = await User.findOne({ 
+            _id: lecturerId, 
+            role: "LECTURER",
+            isActive: true 
+        });
+        
+        if (!lecturer) {
+            return res.status(404).json({ 
+                success: false,
+                error: "Lecturer not found" 
+            });
+        }
+        
+        // Check if the student follows this lecturer
+        if (!student.followedLecturers || !student.followedLecturers.some(id => id.toString() === lecturerId)) {
+            return res.status(403).json({ 
+                success: false,
+                error: "You can only chat with lecturers you follow" 
+            });
+        }
+        
+        // Check if a chat room already exists between these users
+        let chatRoom = await ChatRoom.findOne({
+            participants: { $all: [userId, lecturerId] }
+        });
+        
+        // If no chat room exists, create one
+        if (!chatRoom) {
+            chatRoom = new ChatRoom({
+                participants: [userId, lecturerId]
+            });
+            await chatRoom.save();
+            
+            // Create a welcome message
+            const welcomeMessage = new Message({
+                room: chatRoom._id,
+                sender: null, // System message
+                content: `Chat started between ${student.userName} and ${lecturer.userName}.`
+            });
+            await welcomeMessage.save();
+        }
+        
+        // Populate the chat room with participant details
+        await chatRoom.populate({
+            path: 'participants',
+            select: 'userName email profileImage role'
+        });
+        
+        // Get the last message in the chat room
+        const lastMessage = await Message.findOne({ room: chatRoom._id })
+            .sort({ createdAt: -1 })
+            .populate({
+                path: 'sender',
+                select: 'userName'
+            });
+        
+        // Format the response
+        const response = {
+            _id: chatRoom._id,
+            participants: chatRoom.participants.filter(
+                participant => participant._id.toString() !== userId.toString()
+            ),
+            isEscalated: chatRoom.isEscalated,
+            createdAt: chatRoom.createdAt,
+            updatedAt: chatRoom.updatedAt,
+            lastMessage: lastMessage ? {
+                content: lastMessage.content,
+                sender: lastMessage.sender ? lastMessage.sender.userName : 'System',
+                createdAt: lastMessage.createdAt
+            } : null
+        };
+        
+        return res.status(200).json({
+            success: true,
+            message: "Chat room created successfully",
+            data: response
+        });
+    } catch (error) {
+        logger.error("Error creating chat with lecturer:", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to create chat with lecturer",
+            details: error.message
+        });
+    }
+};
+
 module.exports = {
     getUserChatRooms,
     getChatRoomMessages,
     getEscalatedChats,
-    sendChatMessage
+    sendChatMessage,
+    createChatWithLecturer
 };
