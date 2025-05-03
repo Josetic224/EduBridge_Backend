@@ -6,6 +6,7 @@ const db = require("../configs/dbConfig");
 const {AppError} = require("../helpers/error");
 const { logger, expressPinoLogger } = require("../utils/logger.util");
 const initializeSocket = require("../socket");
+const { swaggerDocs } = require("../configs/swagger");
 
 // Create Express app
 const app = express();
@@ -33,6 +34,9 @@ require("../routes/index.routes")(app);
 
 //calling the db connection
 db();
+
+// Initialize Swagger documentation
+swaggerDocs(app);
 
 app.use((error, req, res, next) => {
     error.status = error.status || "error";
